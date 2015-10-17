@@ -200,6 +200,16 @@ districts[, affected.vars] <- districts[, affected.vars] %>% "*"(districts$perce
 
 districts[, affected.vars[-12]] <- lapply(districts[, affected.vars[-12]], FUN = as.integer)
 districts$avg.tot.prns.in.hhd.acs <- districts$avg.tot.prns.in.hhd.acs %>% round(6)
+districts$pct.hs.grad.acs <- 1 - districts$pct.not.hs.grad.acs
+
+###### Predictive Models ######
+districts$class <- as.factor(ifelse(districts$all.rate >= 90, ">=90", "<90"))
+
+# Decision Tree Models
+## Initial Take
+rate.formula <- class ~ pct.hs.grad.acs + pct.college.acs + med.hhd.inc.acs +
+    med.house.value.acs + pct.born.us.acs + pct.born.foreign.acs
+tree <- rpart(rate.formula, data = districts)
 
 
 ###### THE END ######
