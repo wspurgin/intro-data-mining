@@ -342,11 +342,10 @@ districts <- select(census.data, one_of(census.key.vars)) %>%
   rename(district.id = Leaid, percentage = Percentage)
 
 # Apply overlap percentage across the lot
-affected.vars <- c(2:13, 16:25)
+affected.vars <- 16:23
 districts[, affected.vars] <- districts[, affected.vars] %>% "*"(districts$percentage) / 100
 
-# 13 is purposefully left out!
-districts[, affected.vars[-12]] <- lapply(districts[, affected.vars[-12]], FUN = as.integer)
+districts[, affected.vars] <- lapply(districts[, affected.vars], FUN = as.integer)
 districts$avg.tot.prns.in.hhd.acs <- districts$avg.tot.prns.in.hhd.acs %>% round(6)
 
 districts$pct.college <- districts$college.acs / districts$tot.population.acs * 100
