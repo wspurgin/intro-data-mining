@@ -31,7 +31,7 @@ c(census.data.csv, grad.rates.csv, max.tract.overlap.csv) %>%  paste("Reading da
 census.data.orig <- read.csv(census.data.csv)
 grad.rates <- read.csv(grad.rates.csv)
 max.tract.overlap <- read.csv(max.tract.overlap.csv)
-f33.data <- read.csv(f33.data.csv, sep = "\t", na.strings = c("NA", "NULL", "N", "-2", "-1"))
+f33.data <- read.csv(f33.data.csv, sep = "\t", na.strings = c("NA", "NULL", "-2", "-1"))
 
 rm(max.tract.overlap.csv, grad.rates.csv, census.data.csv, f33.data.csv, args)
 
@@ -247,17 +247,26 @@ districts$pct.hs.grad.acs <- 1 - districts$pct.not.hs.grad.acs
 other.cohorts <- c("ecd.cohort", "mbl.cohort", "mhi.cohort")
 districts[, other.cohorts] <- districts[, other.cohorts] %>% as.percentage(districts$all.cohort)
 
+small.districts <- districts[districts$all.cohort < 61, ]
+districts <- districts[districts$all.cohort > 60, ]
+
+nrow(small.districts) / nrow(merged.data)
+
+
 ##### Correlation Analysis ######
 
-df <- districts[, colnames(districts)[!colnames(districts) %in% c("gidtr", "district.id", "percentage", "state.name")]]
+df <- districts[, colnames(districts)[!colnames(districts) %in% c("gidtr", "district.id", "percentage", "state.name", "ecd.rate", "mbl.rate", "mhi.rate", "class")]]
 colnames(df) <- c("Land Area", "Population", "Pop. btw 5-17",
                   "Below Poverty Level", "Unemployment",
                   "Young-Age Unemployment", "Born in US", "Born Foregin",
                   "Minors", "Income", "Persons per Household", "No HS Degree",
-                  "College Educated", "Housing Value", "All Student Cohort",
-                  "All Stud. Grad. Rate", "% Econ. Disadv.", "Ecd Grad. Rate",
-                  "% African Amer.", "African Amer. Grad. Rate",
-                  "% Hispanic", "Hispanic Grad. Rate", "HS Degree")
+                  "% College Educated", "Housing Value",
+                  "All Student Cohort", "Grad Rate", "% Econ. Disadv.", "% African Amer.",
+                  "% Hispanic", "Tot. Rev.", "% Fed Rev.", "% State Rev.",
+                  "% Local Rev.", "Tot. Expend.", "% Stud Expend",
+                  "% Inst Expend", "% Supp Expend", "% Oth. Expend",
+                  "% Non-Stud Expend", "% Captial Expend", "Transfer Equity",
+                  "% T1 Revenue", "RevPerStudent", "HS Degree")
 
 M <- cor(df, use="pairwise.complete.obs")
 corrplot(M, method = "circle", tl.cex = .7, tl.srt = 45, order = "hclust")
@@ -290,10 +299,10 @@ rpart.plot(fit$finalModel, extra=4)
 confusionMatrix(data = predict(fit, newdata = testing), testing$class, positive = ">=90")
 
 # Since we're under the assumption that we don't know *any grad rates*
-unreflected.vars <- c(1, 16, 17, 19, 21, 23, 25, 27)
+unreflected.vars <- c(1, 16, 17, 18, 20, 22, 24, 26, 28)
 
 # Removing only the other cohort rate variables
-fit <- train(districts[, -unreflected.vars], districts[,27], method = "rpart",
+fit <- train(districts[, -unreflected.vars], districts[,28], method = "rpart",
              control=rpart.control(minsplit=2),
              tuneGrid=data.frame(.cp=0.01),
 
@@ -363,12 +372,6 @@ districts$pct.college.acs <- districts$pct.college.acs * 100
 districts$revenue.per.student <- districts$total.revenue - districts$transfer.equity %>%
   "/"(districts$all.cohort)
 
-# Apply overlap percentage across the tract variables
-# affected.vars <- 19:(ncol(districts) - length(financial.key.vars) - 1)
-# districts[, affected.vars] <- districts[, affected.vars] %>% "*"(districts$percentage) / 100
-#
-# districts[, affected.vars] <- lapply(districts[, affected.vars], FUN = as.integer)
-# districts$avg.tot.prns.in.hhd.acs <- districts$avg.tot.prns.in.hhd.acs %>% round(6)
 districts$pct.hs.grad.acs <- 1 - districts$pct.not.hs.grad.acs
 
 other.cohorts <- c("ecd.cohort", "mbl.cohort", "mhi.cohort")
@@ -383,6 +386,9 @@ other.expenditures <- c("expend.elem.sec", "expend.instruction", "expend.support
                         "expend.non.elem.sec", "expend.capital", "transfer.equity")
 districts[, other.expenditures] <- districts[, other.expenditures] %>%
   as.percentage(districts$total.expenditures)
+
+small.districts <- districts[districts$all.cohort < 61, ]
+districts <- districts[districts$all.cohort > 60, ]
 
 # add the class variable onto the end
 districts$class <- factor(districts$all.rate >= 90, levels = c(TRUE, FALSE), labels = c("GTE90", "LT90"))
@@ -422,10 +428,183 @@ pred <- predict(fit, newdata = testing)
 m <- confusionMatrix(data = pred, testing$class, positive = "GTE90")
 m
 rpart.plot(fit$finalModel)
+varImp(fit)
 
-##### Prediction by States ######
-districts <- merged.data %>% select(one_of(c(census.key.vars, grad.rates.key.vars)))
+national.results.finance <- list(model = fit, con.mat = m)
 
+rm(df, testing, training, in.train, fit, pred, other.cohorts, m)
+
+districts$class <- as.factor(sapply(districts$all.rate, FUN = function(rate) {
+  if(rate >= 90) {
+    "GTE90"
+  } else if (rate < 90 && rate >= 80) {
+    "GTE80.LT90"
+  } else if (rate < 80 && rate >= 65) {
+    "GTE65.LT80"
+  } else {
+    "LT65"
+  }
+}))
+
+df <- districts[, colnames(districts)[!colnames(districts)
+                                      %in% c("gidtr", "district.id",
+                                             "percentage", "ecd.rate",
+                                             "mbl.rate", "mhi.rate",
+                                             "all.rate", "state.name")]]
+colnames(df) <- c("Land Area", "Population", "Pop. btw 5-17",
+                  "Below Poverty Level", "Unemployment",
+                  "Young-Age Unemployment", "Born in US", "Born Foregin",
+                  "Minors", "Income", "Persons per Household", "No HS Degree",
+                  "% College Educated", "Housing Value",
+                  "All Student Cohort", "% Econ. Disadv.", "% African Amer.",
+                  "% Hispanic", "Tot. Rev.", "% Fed Rev.", "% State Rev.",
+                  "% Local Rev.", "Tot. Expend.", "% Stud Expend",
+                  "% Inst Expend", "% Supp Expend", "% Oth. Expend",
+                  "% Non-Stud Expend", "% Captial Expend", "Transfer Equity",
+                  "RevPerStudent", "HS Degree", "class")
+in.train <- createDataPartition(y=df$class, p = .75, list=FALSE)
+training <- df[in.train, ]
+testing <- df[-in.train, ]
+
+class.var <- ncol(training)
+fit <- train(training[,-class.var], training[,class.var], method = "rpart",
+             control = rpart.control(minsplit=5),
+             trControl = trainControl(method = "cv"),
+             tuneLength = 20)
+
+pred <- predict(fit, newdata = testing)
+m <- confusionMatrix(data = pred, testing$class, positive = "GTE90")
+m
+rpart.plot(fit$finalModel)
+varImp(fit)
+
+
+# Prediction with T1 ----------------------------------------------------
+
+financial.key.vars <- c("TOTALREV", "TFEDREV", "TSTREV", "TLOCREV",
+                        "TOTALEXP", "TCURELSC", "TCURINST", "TCURSSVC",
+                        "TCUROTH", "TNONELSE", "TCAPOUT", "L12", "C14")
+
+districts <- merged.data %>%
+  select(one_of(c(census.key.vars, grad.rates.key.vars,
+                  financial.key.vars))) %>%
+  rename(total.revenue = TOTALREV, revenue.fed = TFEDREV, revenue.state = TSTREV,
+         revenue.local = TLOCREV, total.expenditures = TOTALEXP,
+         expend.elem.sec = TCURELSC, expend.instruction = TCURINST,
+         expend.support = TCURSSVC, expend.other = TCUROTH,
+         expend.non.elem.sec = TNONELSE, expend.capital = TCAPOUT,
+         transfer.equity = L12, t1.rev.fed = C14)
+
+districts$pct.college.acs <- districts$pct.college.acs * 100
+districts$revenue.per.student <- districts$total.revenue - districts$transfer.equity %>%
+  "/"(districts$all.cohort)
+
+
+districts$pct.hs.grad.acs <- 1 - districts$pct.not.hs.grad.acs
+
+other.cohorts <- c("ecd.cohort", "mbl.cohort", "mhi.cohort")
+districts[, other.cohorts] <- districts[, other.cohorts] %>%
+  as.percentage(districts$all.cohort)
+
+other.revenue <- c("revenue.fed", "revenue.state", "revenue.local", "t1.rev.fed")
+districts[, other.revenue] <- districts[, other.revenue] %>%
+  as.percentage(districts$total.revenue)
+
+other.expenditures <- c("expend.elem.sec", "expend.instruction", "expend.support", "expend.other",
+                        "expend.non.elem.sec", "expend.capital", "transfer.equity")
+districts[, other.expenditures] <- districts[, other.expenditures] %>%
+  as.percentage(districts$total.expenditures)
+
+small.districts <- districts[districts$all.cohort < 61, ]
+districts <- districts[districts$all.cohort > 60, ]
+
+# add the class variable onto the end
+districts$class <- factor(districts$all.rate >= 90, levels = c(TRUE, FALSE), labels = c("GTE90", "LT90"))
+districts <- districts[!is.na(districts$class), ]
+
+df <- districts[, colnames(districts)[!colnames(districts)
+                                      %in% c("gidtr", "district.id",
+                                             "percentage", "ecd.rate",
+                                             "mbl.rate", "mhi.rate",
+                                             "all.rate", "state.name")]]
+
+colnames(df) <- c("Land Area", "Population", "Pop. btw 5-17",
+                  "Below Poverty Level", "Unemployment",
+                  "Young-Age Unemployment", "Born in US", "Born Foregin",
+                  "Minors", "Income", "Persons per Household", "No HS Degree",
+                  "% College Educated", "Housing Value",
+                  "All Student Cohort", "% Econ. Disadv.", "% African Amer.",
+                  "% Hispanic", "Tot. Rev.", "% Fed Rev.", "% State Rev.",
+                  "% Local Rev.", "Tot. Expend.", "% Stud Expend",
+                  "% Inst Expend", "% Supp Expend", "% Oth. Expend",
+                  "% Non-Stud Expend", "% Captial Expend", "Transfer Equity",
+                  "% T1 Rev.", "RevPerStudent", "HS Degree", "class")
+in.train <- createDataPartition(y=df$class, p = .75, list=FALSE)
+training <- df[in.train, ]
+testing <- df[-in.train, ]
+
+class.var <- ncol(training)
+fit <- train(training[,-class.var], training[,class.var], method = "rpart",
+             control=rpart.control(minsplit=5),
+             trControl = trainControl(method = "cv",
+                                      classProbs = TRUE,
+                                      summaryFunction = twoClassSummary),
+             metric = "ROC",
+             tuneLength=20)
+
+pred <- predict(fit, newdata = testing)
+m <- confusionMatrix(data = pred, testing$class, positive = "GTE90")
+m
+rpart.plot(fit$finalModel)
+varImp(fit)
+
+national.results.finance <- list(model = fit, con.mat = m)
+
+rm(df, testing, training, in.train, fit, pred, other.cohorts, m)
+
+districts$class <- as.factor(sapply(districts$all.rate, FUN = function(rate) {
+  if(rate >= 90) {
+    "GTE90"
+  } else if (rate < 90 && rate >= 80) {
+    "GTE80.LT90"
+  } else if (rate < 80 && rate >= 65) {
+    "GTE65.LT80"
+  } else {
+    "LT65"
+  }
+}))
+
+df <- districts[, colnames(districts)[!colnames(districts)
+                                      %in% c("gidtr", "district.id",
+                                             "percentage", "ecd.rate",
+                                             "mbl.rate", "mhi.rate",
+                                             "all.rate", "state.name")]]
+colnames(df) <- c("Land Area", "Population", "Pop. btw 5-17",
+                  "Below Poverty Level", "Unemployment",
+                  "Young-Age Unemployment", "Born in US", "Born Foregin",
+                  "Minors", "Income", "Persons per Household", "No HS Degree",
+                  "% College Educated", "Housing Value",
+                  "All Student Cohort", "% Econ. Disadv.", "% African Amer.",
+                  "% Hispanic", "Tot. Rev.", "% Fed Rev.", "% State Rev.",
+                  "% Local Rev.", "Tot. Expend.", "% Stud Expend",
+                  "% Inst Expend", "% Supp Expend", "% Oth. Expend",
+                  "% Non-Stud Expend", "% Captial Expend", "Transfer Equity",
+                  "% T1 Rev.", "RevPerStudent", "HS Degree", "class")
+in.train <- createDataPartition(y=df$class, p = .75, list=FALSE)
+training <- df[in.train, ]
+testing <- df[-in.train, ]
+
+class.var <- ncol(training)
+fit <- train(training[,-class.var], training[,class.var], method = "rpart",
+             control = rpart.control(minsplit=5),
+             trControl = trainControl(method = "cv"),
+             tuneLength = 20)
+
+pred <- predict(fit, newdata = testing)
+m <- confusionMatrix(data = pred, testing$class, positive = "GTE90")
+m
+rpart.plot(fit$finalModel)
+varImp(fit)
 
 
 
