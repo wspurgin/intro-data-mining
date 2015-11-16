@@ -28,6 +28,7 @@ discretized.districts <- districts %>% select(-one_of("gidtr", "district.id", "p
 colsToDescretize <- colnames(discretized.districts)[!colnames(discretized.districts) == "state.name"]
 
 library("arules")
+library("arulesViz")
 
 # Being lazy and only using frequency...
 for(i in 1:length(colsToDescretize))
@@ -36,20 +37,39 @@ for(i in 1:length(colsToDescretize))
                                                            labels = c("low", "medium", "high"))
 
 
+# Helpful visuals
+smoothed <- density(districts$all.rate, bw = "nrd")
+hist(districts$all.rate, breaks = 40, freq = FALSE, xlab = "District Grad Rate", main = "District Grad Rate Densities w/ Smoothing")
+lines(smoothed, col="red", lwd = 2)
+
+barplot(table(discretized.districts$all.rate) / nrow(discretized.districts), main = "Grad Rate Discretized Group Density", ylab="Density", xlab="Discretized Group", ylim = c(0, .5))
+
 # Association Rule Mapping ------------------------------------------------
 
 trans <- as(discretized.districts, "transactions")
 trans
 
-r <- apriori(trans, parameter = list(support=0.02))
+# Only contains with all.rate in the right hand side (should be around 473K)
+r <- apriori(trans, parameter = list(support=0.02),
+             appearance = list(rhs = c("all.rate=low",
+                                       "all.rate=medium",
+                                       "all.rate=high"),
+                               default = "lhs"))
 
-# Only run inspect if you want to. It takes "awhile".
-# inspect(head(sort(r, by = "lift")))
 
-# Only contains with all.rate in the right hand side (should be around 350K).
-r2 <- subset(r, rhs %pin% "all.rate")
-rm(r)
+inspect(head(sort(r, by = "lift")))
 
-inspect(head(sort(r2, by = "lift")))
+plot(r)
 
-plot(r2)
+m <- interestMeasure(r, measure = c("chiSquared", "fishersExactTest"),
+                     transactions = trans)
+quality(r) <- cbind(quality(r), m)
+inspect(head(r))
+
+inspect(head(sort(r, by = "fisher", decreasing = FALSE)))
+inspect(head(sort(r, by = "fisher", decreasing = FALSE)))
+plot(head(sort(r, by = "fisher", decreasing = FALSE), n = 50), method = "graph", interactive = TRUE)
+
+r2 <- subset(r, rhs %pin% "all.rate=high")
+inspect(head(sort(r2, by = "fisher", decreasing = FALSE)))
+plot(head(sort(r2, by = "fisher", decreasing = FALSE), n = 50), method = "graph", interactive = TRUE)
